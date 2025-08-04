@@ -75,9 +75,28 @@ class SecureRandom {
   }
 
   static computeHMAC(key, number) {
-    // try to use sha3-256, fallback to sha256 if not available
     const algo = crypto.getHashes().includes('sha3-256') ? 'sha3-256' : 'sha256';
     return crypto.createHmac(algo, key).update(number.toString()).digest('hex').toUpperCase();
+  }
+}
+
+// bias-free random integer
+function secureRandomIndex(max) {
+  if (max < 0) throw new Error('max must be non-negative');
+  if (max === 0) return 0;
+  
+  const range = BigInt(max + 1);
+  const bits = range.toString(2).length;
+  const bytes = Math.ceil(bits / 8);
+  const mask = (BigInt(1) << BigInt(bits)) - BigInt(1);
+  while (true) {
+    const buf = crypto.randomBytes(bytes);
+    let value = BigInt(0);
+    for (let i = 0; i < bytes; i++) {
+      value = (value << BigInt(8)) + BigInt(buf[i]);
+    }
+    value = value & mask;
+    if (value < range) return Number(value);
   }
 }
 
@@ -85,9 +104,8 @@ class FairRandomGenerator {
   constructor(max) {
     this.max = max;
     this.key = SecureRandom.generateKey();
-    // generate a number in [0, max]
-    const buffer = crypto.randomBytes(4);
-    this.computerNumber = buffer.readUInt32BE(0) % (max + 1);
+    // secure random number
+    this.computerNumber = secureRandomIndex(max);
     this.hmac = SecureRandom.computeHMAC(this.key, this.computerNumber);
   }
 
@@ -109,7 +127,6 @@ class FairRandomGenerator {
 }
 
 class CoinFlip {
-  // Simplified fair coin flip to decide who picks first
   static async decideFirstPlayer() {
     console.log("Let's decide who picks first with a provably fair coin flip.");
     const generator = new FairRandomGenerator(1); // 0 or 1
@@ -129,7 +146,9 @@ class CoinFlip {
     console.log(
       `Reveal: Computer number = ${generator.getComputerNumber()} (Key: ${generator.getKey()})`
     );
-    console.log(`Computed result = (computer + user) % 2 = (${generator.getComputerNumber()} + ${userChoice}) % 2 = ${result}`);
+    console.log(
+      `Computed result = (computer + user) % 2 = (${generator.getComputerNumber()} + ${userChoice}) % 2 = ${result}`
+    );
     console.log(computerFirst ? 'Computer picks first!' : 'You pick first!');
 
     return computerFirst;
@@ -148,12 +167,12 @@ class Game {
     if (computerFirst === null) return;
 
     if (computerFirst) {
-      this.computerDie = this.dice[Math.floor(Math.random() * this.dice.length)];
+      this.computerDie = this.dice[secureRandomIndex(this.dice.length - 1)];
       console.log('Computer picks die: [' + this.computerDie.faces.join(',') + ']');
       await this.selectUserDie();
     } else {
       await this.selectUserDie();
-      this.computerDie = this.dice[Math.floor(Math.random() * this.dice.length)];
+      this.computerDie = this.dice[secureRandomIndex(this.dice.length - 1)];
       console.log('Computer picks die: [' + this.computerDie.faces.join(',') + ']');
     }
 
@@ -176,7 +195,6 @@ class Game {
       console.log(`It's a tie! (${userRollFace} = ${computerRollFace})`);
     }
 
-    // Optional: show pairwise win chances
     console.log('\nPairwise win probability table:');
     console.log(ProbabilityCalculator.generateProbabilityTable(this.dice));
   }
